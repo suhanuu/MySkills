@@ -1,53 +1,36 @@
 /**
  * SQLite Database Layer for English Vocabulary Coach
- * Uses sqlite3 CLI tool (no external npm dependencies required)
+ * Uses better-sqlite3 for safe parameterized queries
  */
 
-const { execSync } = require('child_process');
+const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, 'vocabulary.db');
-const SQLITE3_CMD = 'sqlite3';
+const DB_PATH = process.env.ENGLISH_DB_PATH || path.join(__dirname, 'vocabulary.db');
 
-function executeSQL(sql, params = []) {
-    let command = `${SQLITE3_CMD} -json "${DB_PATH}"`;
-    
-    // Replace ? placeholders with escaped values
-    let processedSQL = sql;
-    params.forEach(param => {
-        if (typeof param === 'string') {
-            processedSQL = processedSQL.replace('?', `'${param.replace(/'/g, "''")}'`);
-        } else {
-            processedSQL = processedSQL.replace('?', param);
-        }
-    });
-    
-    command += ` "${processedSQL.replace(/"/g, '\\"')}"`;
-    
-    try {
-        const result = execSync(command, { encoding: 'utf8', timeout: 30000 });
-        if (!result.trim()) return [];
-        try {
-            return JSON.parse(result);
-        } catch (e) {
-            return result.trim();
-        }
-    } catch (error) {
-        console.error('SQL Error:', error.message);
-        return null;
-    }
+// Auto-create directory if it doesn't exist
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
 }
 
+const db = new Database(DB_PATH);
+
+// Enable WAL mode for better concurrent access
+db.pragma('journal_mode = WAL');
+
 function initDatabase() {
-    const sqls = [
-        `CREATE TABLE IF NOT EXISTS user_profile (
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS user_profile (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             target_exam TEXT DEFAULT '',
             vocabulary_level TEXT DEFAULT 'Medium',
             grammar_basis TEXT DEFAULT 'Weak',
             total_words_count INTEGER DEFAULT 0
-        )`,
-        `CREATE TABLE IF NOT EXISTS words (
+        );
+
+        CREATE TABLE IF NOT EXISTS words (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             word TEXT UNIQUE NOT NULL,
             pos TEXT,
@@ -58,49 +41,63 @@ function initDatabase() {
             tips TEXT,
             tag TEXT,
             created_at INTEGER DEFAULT (strftime('%s', 'now'))
-        )`,
-        `CREATE TABLE IF NOT EXISTS review_queue (
+        );
+
+        CREATE TABLE IF NOT EXISTS review_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             word TEXT NOT NULL,
             stage INTEGER DEFAULT 1,
             next_review_time INTEGER,
+            is_reviewed INTEGER DEFAULT 0,
             FOREIGN KEY (word) REFERENCES words(word)
-        )`,
-        `CREATE TABLE IF NOT EXISTS history_logs (
+        );
+
+        CREATE TABLE IF NOT EXISTS history_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT,
             type TEXT,
-            count INTEGER DEFAULT 0
-        )`,
-        `CREATE INDEX IF NOT EXISTS idx_words_word ON words(word)`,
-        `CREATE INDEX IF NOT EXISTS idx_words_tag ON words(tag)`,
-        `CREATE INDEX IF NOT EXISTS idx_review_queue_time ON review_queue(next_review_time)`,
-        `CREATE INDEX IF NOT EXISTS idx_review_queue_word ON review_queue(word)`,
-        `CREATE INDEX IF NOT EXISTS idx_history_date ON history_logs(date)`,
-        `INSERT OR IGNORE INTO user_profile (id) VALUES (1)`
-    ];
-    
-    sqls.forEach(sql => executeSQL(sql));
+            count INTEGER DEFAULT 0,
+            UNIQUE(date, type)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_words_word ON words(word);
+        CREATE INDEX IF NOT EXISTS idx_words_tag ON words(tag);
+        CREATE INDEX IF NOT EXISTS idx_review_queue_time ON review_queue(next_review_time);
+        CREATE INDEX IF NOT EXISTS idx_review_queue_word ON review_queue(word);
+        CREATE INDEX IF NOT EXISTS idx_review_queue_due ON review_queue(next_review_time ASC, is_reviewed ASC);
+        CREATE INDEX IF NOT EXISTS idx_history_date ON history_logs(date);
+
+        INSERT OR IGNORE INTO user_profile (id) VALUES (1);
+    `);
 }
 
 // Initialize on module load
 initDatabase();
 
+// ============ HELPER ============
+
+const ALLOWED_PROFILE_KEYS = new Set(['target_exam', 'vocabulary_level', 'grammar_basis', 'total_words_count']);
+
+function parseWordRow(row) {
+    if (row.collocation) {
+        try { row.collocation = JSON.parse(row.collocation); }
+        catch (e) { row.collocation = []; }
+    }
+    return row;
+}
+
 // ============ USER PROFILE OPERATIONS ============
 
 function getProfile() {
-    const result = executeSQL('SELECT * FROM user_profile WHERE id = 1');
-    return Array.isArray(result) && result.length > 0 ? result[0] : null;
+    return db.prepare('SELECT * FROM user_profile WHERE id = 1').get();
 }
 
 function updateProfile(updates) {
-    const keys = Object.keys(updates);
-    const setClause = keys.map(k => {
-        const val = typeof updates[k] === 'string' ? `'${updates[k]}'` : updates[k];
-        return `${k} = ${val}`;
-    }).join(', ');
-    
-    executeSQL(`UPDATE user_profile SET ${setClause} WHERE id = 1`);
+    const keys = Object.keys(updates).filter(k => ALLOWED_PROFILE_KEYS.has(k));
+    if (keys.length === 0) return getProfile();
+
+    const sql = `UPDATE user_profile SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE id = 1`;
+    db.prepare(sql).run(...keys.map(k => updates[k]));
     return getProfile();
 }
 
@@ -111,210 +108,146 @@ function setTargetExam(exam) {
 // ============ WORDS OPERATIONS ============
 
 function getWord(word) {
-    const result = executeSQL('SELECT * FROM words WHERE word = ?', [word]);
-    if (Array.isArray(result) && result.length > 0) {
-        const row = result[0];
-        if (row.collocation) {
-            try {
-                row.collocation = JSON.parse(row.collocation);
-            } catch (e) {
-                row.collocation = [];
-            }
-        }
-        return row;
-    }
-    return null;
+    return parseWordRow(db.prepare('SELECT * FROM words WHERE word = ?').get(word));
 }
 
 function wordExists(word) {
-    const result = executeSQL('SELECT COUNT(*) as count FROM words WHERE word = ?', [word]);
-    return Array.isArray(result) && result[0].count > 0;
+    const row = db.prepare('SELECT COUNT(*) as count FROM words WHERE word = ?').get(word);
+    return row.count > 0;
 }
 
 function addWord(wordData) {
     const { word, pos, meaning, frequency, collocation, example, tips, tag } = wordData;
-    
     const collocationJson = Array.isArray(collocation) ? JSON.stringify(collocation) : collocation;
-    
-    executeSQL(`INSERT OR REPLACE INTO words (word, pos, meaning, frequency, collocation, example, tips, tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, 
-        [word, pos, meaning, frequency || 0, collocationJson, example, tips, tag]);
-    
-    // Update total count
-    const countResult = executeSQL('SELECT COUNT(*) as total FROM words');
-    if (Array.isArray(countResult) && countResult.length > 0) {
-        updateProfile({ total_words_count: countResult[0].total });
+
+    // Check if word already exists before inserting
+    const exists = db.prepare('SELECT COUNT(*) as count FROM words WHERE word = ?').get(word).count;
+    db.prepare(
+        `INSERT OR REPLACE INTO words (word, pos, meaning, frequency, collocation, example, tips, tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(word, pos, meaning, frequency || 0, collocationJson, example, tips, tag);
+
+    // Update total count: increment only on new word
+    if (!exists) {
+        db.prepare('UPDATE user_profile SET total_words_count = total_words_count + 1 WHERE id = 1').run();
+    } else {
+        const count = db.prepare('SELECT COUNT(*) as total FROM words').get().total;
+        db.prepare('UPDATE user_profile SET total_words_count = ? WHERE id = 1').run(count);
     }
-    
+
     return true;
 }
 
 function getAllWords() {
-    const result = executeSQL('SELECT * FROM words ORDER BY created_at DESC');
-    if (Array.isArray(result)) {
-        return result.map(row => {
-            if (row.collocation) {
-                try {
-                    row.collocation = JSON.parse(row.collocation);
-                } catch (e) {
-                    row.collocation = [];
-                }
-            }
-            return row;
-        });
-    }
-    return [];
+    return db.prepare('SELECT * FROM words ORDER BY created_at DESC').all().map(parseWordRow);
 }
 
 function getWordsByTag(tag) {
-    const result = executeSQL('SELECT * FROM words WHERE tag = ?', [tag]);
-    if (Array.isArray(result)) {
-        return result.map(row => {
-            if (row.collocation) {
-                try {
-                    row.collocation = JSON.parse(row.collocation);
-                } catch (e) {
-                    row.collocation = [];
-                }
-            }
-            return row;
-        });
-    }
-    return [];
+    return db.prepare('SELECT * FROM words WHERE tag = ? ORDER BY created_at DESC').all(tag).map(parseWordRow);
 }
 
 function getRecentWords(limit = 5) {
-    const result = executeSQL(`SELECT * FROM words ORDER BY created_at DESC LIMIT ${limit}`);
-    if (Array.isArray(result)) {
-        return result.map(row => {
-            if (row.collocation) {
-                try {
-                    row.collocation = JSON.parse(row.collocation);
-                } catch (e) {
-                    row.collocation = [];
-                }
-            }
-            return row;
-        });
-    }
-    return [];
+    return db.prepare('SELECT * FROM words ORDER BY created_at DESC LIMIT ?').all(limit).map(parseWordRow);
 }
 
 function getRandomWords(count = 5) {
-    const result = executeSQL(`SELECT * FROM words ORDER BY RANDOM() LIMIT ${count}`);
-    if (Array.isArray(result)) {
-        return result.map(row => {
-            if (row.collocation) {
-                try {
-                    row.collocation = JSON.parse(row.collocation);
-                } catch (e) {
-                    row.collocation = [];
-                }
-            }
-            return row;
-        });
-    }
-    return [];
+    return db.prepare('SELECT * FROM words ORDER BY RANDOM() LIMIT ?').all(count).map(parseWordRow);
 }
 
 // ============ REVIEW QUEUE OPERATIONS ============
 
+// Ebbinghaus review intervals in seconds: 1d, 2d, 4d, 8d, 16d (matches Schemas.md)
+const REVIEW_INTERVALS = [86400, 172800, 345600, 691200, 1382400];
+
 function addToReviewQueue(word, stage = 1, nextReviewTime = null) {
     if (!nextReviewTime) {
-        nextReviewTime = Math.floor(Date.now() / 1000) + 86400;
+        nextReviewTime = Math.floor(Date.now() / 1000) + REVIEW_INTERVALS[Math.min(stage - 1, REVIEW_INTERVALS.length - 1)];
     }
-    
-    // Check if already in queue
-    const existing = executeSQL('SELECT * FROM review_queue WHERE word = ?', [word]);
-    
-    if (Array.isArray(existing) && existing.length > 0) {
-        executeSQL('UPDATE review_queue SET stage = ?, next_review_time = ? WHERE word = ?', [stage, nextReviewTime, word]);
+
+    const existing = db.prepare('SELECT * FROM review_queue WHERE word = ? AND is_reviewed = 0').get(word);
+
+    if (existing) {
+        db.prepare('UPDATE review_queue SET stage = ?, next_review_time = ?, is_reviewed = 0 WHERE word = ?').run(stage, nextReviewTime, word);
     } else {
-        executeSQL('INSERT INTO review_queue (word, stage, next_review_time) VALUES (?, ?, ?)', [word, stage, nextReviewTime]);
+        db.prepare('INSERT INTO review_queue (word, stage, next_review_time, is_reviewed) VALUES (?, ?, ?, 0)').run(word, stage, nextReviewTime);
     }
-    
+
     return getReviewQueue();
 }
 
 function getReviewQueue() {
-    const result = executeSQL('SELECT * FROM review_queue ORDER BY next_review_time ASC');
-    return Array.isArray(result) ? result : [];
+    return db.prepare('SELECT * FROM review_queue WHERE is_reviewed = 0 ORDER BY next_review_time ASC').all();
 }
 
 function getDueReviews(currentTime = null) {
-    if (!currentTime) {
-        currentTime = Math.floor(Date.now() / 1000);
-    }
-    const result = executeSQL('SELECT * FROM review_queue WHERE next_review_time <= ? ORDER BY next_review_time ASC', [currentTime]);
-    return Array.isArray(result) ? result : [];
+    if (!currentTime) currentTime = Math.floor(Date.now() / 1000);
+    return db.prepare('SELECT * FROM review_queue WHERE next_review_time <= ? AND is_reviewed = 0 ORDER BY next_review_time ASC').all(currentTime);
 }
 
 function updateReviewStage(word, correct, currentTime = null) {
-    if (!currentTime) {
-        currentTime = Math.floor(Date.now() / 1000);
-    }
-    
-    const existing = executeSQL('SELECT * FROM review_queue WHERE word = ?', [word]);
-    if (!Array.isArray(existing) || existing.length === 0) return null;
-    
+    if (!currentTime) currentTime = Math.floor(Date.now() / 1000);
+
+    const existing = db.prepare('SELECT * FROM review_queue WHERE word = ? AND is_reviewed = 0').get(word);
+    if (!existing) return null;
+
     let newStage;
     let nextReviewTime;
-    
+    let isReviewed = 0; // Default: keep in queue for future review
+
     if (correct) {
-        newStage = Math.min(existing[0].stage + 1, 5);
-        const days = Math.pow(2, newStage - 1);
-        nextReviewTime = currentTime + (days * 86400);
+        newStage = Math.min(existing.stage + 1, 5);
+        const intervalIndex = Math.min(newStage - 1, REVIEW_INTERVALS.length - 1);
+        nextReviewTime = currentTime + REVIEW_INTERVALS[intervalIndex];
+        // Mark as reviewed only when reaching max stage (all stages completed)
+        if (newStage === 5) isReviewed = 1;
     } else {
         newStage = 1;
-        nextReviewTime = currentTime + 86400;
+        nextReviewTime = currentTime + REVIEW_INTERVALS[0];
+        // Wrong answer: reset and keep in queue
+        isReviewed = 0;
     }
-    
-    executeSQL('UPDATE review_queue SET stage = ?, next_review_time = ? WHERE word = ?', [newStage, nextReviewTime, word]);
-    
+
+    db.prepare('UPDATE review_queue SET stage = ?, next_review_time = ?, is_reviewed = ? WHERE word = ?').run(newStage, nextReviewTime, isReviewed, word);
     return { word, stage: newStage, next_review_time: nextReviewTime };
 }
 
 function removeFromReviewQueue(word) {
-    executeSQL('DELETE FROM review_queue WHERE word = ?', [word]);
+    db.prepare('DELETE FROM review_queue WHERE word = ?').run(word);
 }
 
 // ============ HISTORY LOG OPERATIONS ============
 
 function addLog(date, type, count = 1) {
-    const existing = executeSQL('SELECT * FROM history_logs WHERE date = ? AND type = ?', [date, type]);
-    
-    if (Array.isArray(existing) && existing.length > 0) {
-        executeSQL('UPDATE history_logs SET count = count + ? WHERE date = ? AND type = ?', [count, date, type]);
-    } else {
-        executeSQL('INSERT INTO history_logs (date, type, count) VALUES (?, ?, ?)', [date, type, count]);
-    }
-    
+    db.prepare(
+        `INSERT INTO history_logs (date, type, count) VALUES (?, ?, ?)
+         ON CONFLICT(date, type) DO UPDATE SET count = count + excluded.count`
+    ).run(date, type, count);
     return getLogs();
 }
 
 function getLogs() {
-    const result = executeSQL('SELECT * FROM history_logs ORDER BY date DESC');
-    return Array.isArray(result) ? result : [];
+    return db.prepare('SELECT * FROM history_logs ORDER BY date DESC').all();
 }
 
 function getLogsByDate(date) {
-    const result = executeSQL('SELECT * FROM history_logs WHERE date = ?', [date]);
-    return Array.isArray(result) ? result : [];
+    return db.prepare('SELECT * FROM history_logs WHERE date = ?').all(date);
 }
 
 // ============ UTILITY OPERATIONS ============
 
 function getStats() {
     const profile = getProfile();
-    const totalWords = executeSQL('SELECT COUNT(*) as count FROM words');
-    const queueSize = executeSQL('SELECT COUNT(*) as count FROM review_queue');
-    const dueReviews = getDueReviews().length;
-    
+    const totalWords = db.prepare('SELECT COUNT(*) as count FROM words').get();
+    const queueSize = db.prepare('SELECT COUNT(*) as count FROM review_queue WHERE is_reviewed = 0').get();
+    const dueReviews = db.prepare(
+        'SELECT COUNT(*) as count FROM review_queue WHERE next_review_time <= ?'
+    ).get(Math.floor(Date.now() / 1000)).count;
+
     return {
         target_exam: profile ? profile.target_exam : '',
         vocabulary_level: profile ? profile.vocabulary_level : 'Medium',
         grammar_basis: profile ? profile.grammar_basis : 'Weak',
-        total_words: Array.isArray(totalWords) && totalWords.length > 0 ? totalWords[0].count : 0,
-        queue_size: Array.isArray(queueSize) && queueSize.length > 0 ? queueSize[0].count : 0,
+        total_words: totalWords.count,
+        queue_size: queueSize.count,
         due_reviews: dueReviews
     };
 }
