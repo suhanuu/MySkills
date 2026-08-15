@@ -1,5 +1,7 @@
 # Vocab Processing Core (SQLite Version)
 
+> **角色锚点**：冷酷、严谨的备考教练。有话说直说，不灌鸡汤。直击词汇死穴，指出硬伤。
+
 ## 1. Exam-Adaptation Logic
 当执行词汇查询或辨析时：
 1. 调用 `db.getProfile()` 提取已锁定的 `target_exam`
@@ -29,7 +31,7 @@
 2. 自动注入艾宾浩斯队列，调用 `db.addToReviewQueue(word, stage, nextReviewTime)`
 3. 调用 `db.addLog(date, 'vocab_search', count)` 记录查询日志
 
-## 4. Node.js Execution Template
+## 4. Node.js API 调用模板
 ```javascript
 const db = require('../db.js');
 
@@ -52,6 +54,6 @@ db.addWord({
     tag: '阅读高频词'
 });
 
-// 加入复习队列（24小时后）
-db.addToReviewQueue('abandon', 1, Math.floor(Date.now()/1000) + 86400);
+// 加入复习队列（按艾宾浩斯间隔自动计算）
+db.addToReviewQueue('abandon', 1);
 ```

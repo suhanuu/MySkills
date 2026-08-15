@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS mistakes (
     mistake_count INTEGER DEFAULT 1,
     last_mistake_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (topic_id) REFERENCES topics(id)
+    FOREIGN KEY (topic_id) REFERENCES topics(id),
+    UNIQUE(topic_id, question, wrong_answer, correct_answer)
 );
 
 CREATE TABLE IF NOT EXISTS progress (
@@ -46,15 +47,18 @@ CREATE TABLE IF NOT EXISTS review_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     topic_id INTEGER NOT NULL,
     stage INTEGER DEFAULT 1,
-    next_review_at TIMESTAMP NOT NULL,
+    next_review_at INTEGER NOT NULL,
     is_reviewed INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (topic_id) REFERENCES topics(id)
 );
 
 CREATE TABLE IF NOT EXISTS user_profile (
-    key TEXT PRIMARY KEY,
-    value TEXT
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam TEXT DEFAULT '',
+    stage TEXT DEFAULT '基础',
+    exam_date TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_mistakes_topic ON mistakes(topic_id);

@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS review_queue (
     word TEXT NOT NULL,                    -- 单词
     stage INTEGER DEFAULT 1,               -- 艾宾浩斯阶段 (1-5)
     next_review_time INTEGER,              -- 下次复习时间戳
+    is_reviewed INTEGER DEFAULT 0,         -- 是否已完成本轮复习
     FOREIGN KEY (word) REFERENCES words(word)
 );
 ```
@@ -61,7 +62,8 @@ CREATE TABLE IF NOT EXISTS history_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT,                             -- 日期 (YYYY-MM-DD)
     type TEXT,                             -- 类型 (vocab_search/exercise/review)
-    count INTEGER DEFAULT 0                -- 计数
+    count INTEGER DEFAULT 0,
+    UNIQUE(date, type)
 );
 ```
 
@@ -71,6 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_words_word ON words(word);
 CREATE INDEX IF NOT EXISTS idx_words_tag ON words(tag);
 CREATE INDEX IF NOT EXISTS idx_review_queue_time ON review_queue(next_review_time);
 CREATE INDEX IF NOT EXISTS idx_review_queue_word ON review_queue(word);
+CREATE INDEX IF NOT EXISTS idx_review_queue_due ON review_queue(next_review_time ASC);
 CREATE INDEX IF NOT EXISTS idx_history_date ON history_logs(date);
 ```
 

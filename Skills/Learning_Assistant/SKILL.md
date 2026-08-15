@@ -4,7 +4,7 @@ description: 通用学习辅助系统，支持任意学科，基于SQLite记录�
 ---
 
 # 技能名称：通用学习助手
-**版本**: 1.0.0
+**版本**: 1.0.1
 
 ---
 
@@ -16,28 +16,22 @@ description: 通用学习辅助系统，支持任意学科，基于SQLite记录�
 
 ## 二、环境要求
 
-| 工具 | 用途 | 验证命令 |
-|------|------|----------|
-| Node.js ≥ 16 | 驱动 JS 辅助脚本 | `node --version` |
-| sqlite3 CLI | 数据库操作 | `sqlite3 --version` |
-| npm | 安装依赖 | `npm --version` |
+| 工具 | 用途 |
+|------|------|
+| Node.js ≥ 16 | 驱动 db.js 数据库层 |
+| sqlite3 CLI | 数据库操作 |
 
-若任一缺失，立即输出：
-```
-[环境检测] 缺少: [工具名]
-请先安装后重试。
-```
-并中止流程。
+db.js 会自动初始化数据库，无需手动执行 schema.sql。
 
 ---
 
 ## 三、首次使用流程
 
 ### 3.1 检测状态
-读取 `/workspace/learner.json`。
+读取 `./db.js` 获取数据库连接，检查 `getProfile()` 结果。
 
-- **不存在** → 进入首次初始化
-- **存在** → 直接进入主流程
+- **用户档案不存在或未初始化**（exam 为空）→ 进入首次初始化
+- **已初始化** → 直接进入主流程
 
 ### 3.2 首次初始化
 逐项询问：
@@ -58,31 +52,22 @@ description: 通用学习辅助系统，支持任意学科，基于SQLite记录�
    例：2027-12-26
 ```
 
-收集答案后执行：
-```bash
-# 创建 learner.json
-cat > /workspace/learner.json << 'EOF'
-{
-  "initialized": true,
-  "setup_date": "YYYY-MM-DD",
-  "subjects": ["学科名"],
-  "exam": "目标考试",
-  "stage": "学习阶段",
-  "exam_date": "YYYY-MM-DD"
-}
-EOF
+收集答案后通过 `./db.js` 执行：
+```javascript
+const db = require('./db.js');
 
-# 初始化数据库
-sqlite3 /workspace/learner.db < /workspace/学习助手/schemas/schema.sql
-
-# 写入用户信息
-sqlite3 /workspace/learner.db "INSERT INTO user_profile (key, value) VALUES ('exam', '目标考试'), ('stage', '学习阶段'), ('exam_date', 'YYYY-MM-DD');"
+// 初始化用户档案
+db.updateProfile({
+    exam: '目标考试',
+    stage: '学习阶段',
+    exam_date: 'YYYY-MM-DD'
+});
 ```
 
 完成后提示：
 ```
 ✅ 初始化完成！
-数据库：/workspace/learner.db
+数据库：./db.js (learner.db)
 当前学科：[学科列表]
 阶段：[阶段]
 
@@ -97,12 +82,12 @@ sqlite3 /workspace/learner.db "INSERT INTO user_profile (key, value) VALUES ('ex
 
 ## 四、功能路由
 
-| 用户指令 | 执行模块 |
-|---------|---------|
-| "帮我学XXX"、"XXX是什么" | Vocab.md |
-| "做题"、"练习"、"出题" | Exercise.md |
-| "总结"、"复习"、"薄弱点" | Review.md |
-| "这道题我错了" | Exercise.md + 记录错题 |
+| 用户指令 | 执行模块 | 角色锚点 |
+|---------|---------|---------|
+| "帮我学XXX"、"XXX是什么" | Vocab.md | 严谨、以结果为导向 |
+| "做题"、"练习"、"出题" | Exercise.md | 冷酷阅卷官，不灌鸡汤 |
+| "总结"、"复习"、"薄弱点" | Review.md | 数据驱动，直击问题 |
+| "这道题我错了" | Exercise.md + 记录错题 | 冷静分析，精准纠正 |
 
 ---
 
@@ -128,19 +113,21 @@ sqlite3 /workspace/learner.db "INSERT INTO user_profile (key, value) VALUES ('ex
 ## 六、数据库操作示例
 
 ### 查询知识点
-```bash
-sqlite3 -json /workspace/learner.db "SELECT t.id, t.name, s.name as subject, t.exam_weight FROM topics t JOIN subjects s ON s.id = t.subject_id WHERE t.name LIKE '%关键词%' LIMIT 10;"
+```javascript
+const db = require('./db.js');
+const results = db.getTopic(null, '关键词');  // LIKE 模糊搜索
 ```
 
 ### 记录错题
-```bash
-sqlite3 /workspace/learner.db "INSERT INTO mistakes (topic_id, question, wrong_answer, correct_answer, explanation) VALUES ($topicId, '$question', '$wrong', '$correct', '$explain');"
-sqlite3 /workspace/learner.db "INSERT INTO review_queue (topic_id, stage, next_review_at, is_reviewed) VALUES ($topicId, 1, datetime('now','+1 day'), 0);"
+```javascript
+const db = require('./db.js');
+db.addMistake(topicId, question, wrongAnswer, correctAnswer, explanation);
 ```
 
 ### 薄弱点统计
-```bash
-sqlite3 -json /workspace/learner.db "SELECT t.name, s.name as subject, COALESCE(SUM(m.mistake_count),0) as errors FROM topics t JOIN subjects s ON s.id = t.subject_id LEFT JOIN mistakes m ON m.topic_id = t.id GROUP BY t.id HAVING errors > 0 ORDER BY errors DESC LIMIT 5;"
+```javascript
+const db = require('./db.js');
+const weakPoints = db.getWeakPoints(5);
 ```
 
 ---
@@ -199,9 +186,9 @@ D. [选项D]
 
 | 约束 | 规则 |
 |------|------|
-| 环境依赖 | Node.js + sqlite3 CLI |
-| 数据文件 | /workspace/learner.db + /workspace/learner.json |
-| 科目/知识点 | 用户首次使用时定义 |
+| 环境依赖 | Node.js ≥ 16 + better-sqlite3（通过 db.js 管理） |
+| 数据文件 | ./learner.db（自动初始化） |
+| 科目/知识点 | 用户首次使用时定义，通过 db.addSubject / db.addTopic |
 | 错题记录 | 答错自动记录，支持手动添加 |
 | 薄弱点加权 | 错误多的知识点出题概率×2 |
 | 艾宾浩斯 | 答错重置 Stage 1，间隔重新计算 |

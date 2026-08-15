@@ -1,18 +1,26 @@
 # 知识点查询模块 (Vocab.md)
 
+> **角色锚点**：严谨、以结果为导向。直接输出知识点讲解，不废话。
+
 ## 工作流程
 1. 解析用户问题，提取关键词
 2. 查询 topics 表，匹配知识点
 3. 若有对应讲解内容，输出结构化讲解
 4. 若无，询问是否要记录新知识点
 
-## 数据库查询
-```bash
-# 搜索知识点
-sqlite3 -json /workspace/learner.db "SELECT t.id, t.name, s.name as subject, t.exam_weight FROM topics t JOIN subjects s ON s.id = t.subject_id WHERE t.name LIKE '%关键词%' ORDER BY t.exam_weight DESC LIMIT 10;"
+## 数据库 API 调用
 
-# 查询错题
-sqlite3 -json /workspace/learner.db "SELECT question, mistake_count, last_mistake_at FROM mistakes WHERE topic_id = ?;"
+```javascript
+const db = require('../db.js');
+
+// 搜索知识点
+const topics = db.getTopic(null, '关键词');  // 模糊搜索
+
+// 查询错题
+const mistakes = db.getMistakesByTopic(topicId);
+
+// 获取掌握度
+const mastery = db.getMasteryLevel(topicId);
 ```
 
 ## 输出格式
