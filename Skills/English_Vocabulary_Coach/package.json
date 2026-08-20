@@ -1,0 +1,9 @@
+{
+  "name": "english-vocabulary-coach",
+  "version": "2.1.0",
+  "description": "英语词汇硬核教练 - SQLite版",
+  "main": "db.js",
+  "dependencies": {
+    "better-sqlite3": "^9.0.0"
+  }
+}
