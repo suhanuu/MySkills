@@ -14,13 +14,13 @@
 const db = require('../db.js');
 
 // 搜索知识点
-const topics = db.getTopic(null, '关键词');  // 模糊搜索
+const topics = db.getTopics(null, '关键词');  // 模糊搜索
 
 // 查询错题
 const mistakes = db.getMistakesByTopic(topicId);
 
 // 获取掌握度
-const mastery = db.getMasteryLevel(topicId);
+const progress = db.updateProgress(topicId, isCorrect);
 ```
 
 ## 输出格式

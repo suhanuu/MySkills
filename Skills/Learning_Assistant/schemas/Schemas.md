@@ -1,4 +1,8 @@
--- 通用学习助手 - 数据库模式
+# 数据库模式 (Schemas)
+
+## 表结构
+
+```sql
 CREATE TABLE IF NOT EXISTS subjects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
@@ -58,8 +62,13 @@ CREATE TABLE IF NOT EXISTS user_profile (
     exam_date TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+```
 
+## 索引
+
+```sql
 CREATE INDEX IF NOT EXISTS idx_mistakes_topic ON mistakes(topic_id);
 CREATE INDEX IF NOT EXISTS idx_mistakes_count ON mistakes(mistake_count DESC);
 CREATE INDEX IF NOT EXISTS idx_progress_mastery ON progress(mastery_level ASC);
 CREATE INDEX IF NOT EXISTS idx_review_queue ON review_queue(next_review_at ASC, is_reviewed ASC);
+```
