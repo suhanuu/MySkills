@@ -28,7 +28,7 @@ const result = db.updateReviewStage(id, true);
 const result = db.updateReviewStage(id, false);
 
 // 标记已复习
-db.markReviewed(id);
+// (通过 updateReviewStage 的 isReviewed 标志实现)
 ```
 
 ## 艾宾浩斯间隔

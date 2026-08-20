@@ -1,0 +1,9 @@
+{
+  "name": "learning-assistant",
+  "version": "1.0.0",
+  "description": "通用学习助手 - SQLite错题追踪与薄弱点复习",
+  "main": "db.js",
+  "dependencies": {
+    "better-sqlite3": "^9.0.0"
+  }
+}
