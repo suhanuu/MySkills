@@ -1,0 +1,12 @@
+{
+  "name": "learning-assistant",
+  "version": "1.0.1",
+  "description": "通用学习辅助系统，支持任意学科，基于SQLite记录错题、追踪薄弱点、提供复习提醒",
+  "main": "db.js",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  }
+}
