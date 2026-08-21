@@ -1,0 +1,11 @@
+{
+  "name": "english-study-skills",
+  "version": "1.0.0",
+  "description": "English learning skill packages with SQLite-backed data layers",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  }
+}

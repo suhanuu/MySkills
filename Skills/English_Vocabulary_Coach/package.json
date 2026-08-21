@@ -1,9 +1,12 @@
 {
   "name": "english-vocabulary-coach",
-  "version": "2.1.0",
-  "description": "英语词汇硬核教练 - SQLite版",
+  "version": "2.0.1",
+  "description": "本地优先、多考试自适应的英语词汇与听说读写硬核教练",
   "main": "db.js",
+  "engines": {
+    "node": ">=16.0.0"
+  },
   "dependencies": {
-    "better-sqlite3": "^9.0.0"
+    "better-sqlite3": "^13.0.3"
   }
 }
